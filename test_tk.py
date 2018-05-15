@@ -9,7 +9,7 @@ import threading
 import tkMessageBox
 from time import time
 import random
-
+from copy import deepcopy
 import mouse
 import mss
 import numpy as np
@@ -162,7 +162,7 @@ class RegionGrowing:
 
         # im=ImageTk.PhotoImage(Image.open(r"C:\Users\Administrator\Downloads\example.png"))
         im = ImageTk.PhotoImage(Image.fromarray(img, 'L'))
-        q.put(im, 0)
+        q.put(deepcopy(im), 0)
         q.put('show', 0)
         # overlay.show_image(im)
         # Image.fromarray(img, 'L').show()
@@ -303,9 +303,9 @@ class RegionGrowingMorph:
                 pass
             self.last_added.append((x, y))
         self.region_hx = Queue.LifoQueue()
-        self.region_hx.put((np.copy(self.region.mask), 0, 0), 0)
+        # self.region_hx.put((np.copy(self.region.mask), 0, 0), 0)
         self.last_added_hx = Queue.LifoQueue()
-        self.last_added_hx.put(np.copy(self.last_added), 0)
+        # self.last_added_hx.put(np.copy(self.last_added), 0)
         self.growing_interval = 0.05
 
         self.growing_timer = None
@@ -315,7 +315,7 @@ class RegionGrowingMorph:
         self.init_time = time()
 
         self.morph = Morph(self.data, (self.y, self.x),
-                           balloon=int((self.this_monitor['width'] + self.this_monitor['height']) / 200.0))
+                           balloon=int((self.this_monitor['width'] + self.this_monitor['height']) / 500.0))
         self.last_levelset = self.morph.last_levelset
 
     def get_neighbors(self, x, y):
@@ -336,7 +336,7 @@ class RegionGrowingMorph:
             iters = 10
 
         for _ in range(iters):
-            self.morph.step()
+            self.morph.step(2)
 
         if np.array_equal(self.last_levelset, self.morph.last_crop_levelset.arr):
             print 'growing done!'
@@ -378,6 +378,7 @@ class RegionGrowingMorph:
         q.queue.clear()
         threading.Timer(0.3, q.put, ['show_info', 0]).start()
         self.overlay(result, *self.morph.last_crop_levelset.bounds())
+        self.growing_state = False
         self.hide_after()
         # print np.nonzero(~self.region.mask)
 
@@ -407,7 +408,7 @@ class RegionGrowingMorph:
         #     # rgb[:, :, 0] = img
         #     rgb[:, :, 1] = img
         #     im = ImageTk.PhotoImage(Image.fromarray(rgb))
-        q.put(img, 0)
+        q.put(deepcopy(img), 0)
         q.put('show', 0)
         # overlay.show_image(im)
         # Image.fromarray(img, 'L').show()
@@ -440,6 +441,7 @@ def lbutton_down(*args):
     #     return
     try:
         task.cancel()
+
     except:
         pass
 
@@ -451,6 +453,7 @@ def lbutton_down(*args):
 def RegionGrowingTask():
     global rg, q
     if mouse.is_pressed():
+        q.put('renew',0)
         q.put('hide_info', 0)
         rg = RegionGrowingMorph()
         rg.growing()
@@ -510,7 +513,7 @@ class Overlay:
             img = q.get(0)
             # print img
             if img == 'show':
-                root.update()
+                # root.update()
                 root.deiconify()
             elif img == 'hide' and not rg.growing_state:
                 root.withdraw()
@@ -522,6 +525,15 @@ class Overlay:
                     # info.config(text=rg.info_text, width=30)
                     # info.place(relx=0.0, rely=1.0)
                     tkMessageBox.showinfo('Info', rg.info_text)
+            elif img == 'renew':
+                canvas.delete(tk.ALL)
+                canvas = tk.Canvas(root, bg="black", bd=0, highlightthickness=0)
+                img = None  # initially only need a canvas image place-holder
+                # img = ImageTk.PhotoImage(Image.open(r"C:\Users\Administrator\Downloads\example.png"))
+                image_id = canvas.create_image(0, 0, image=img, anchor='nw')
+                # canvas.pack(side="left")
+                canvas.place(relx=0.0, rely=0.0, anchor='nw')
+                self.canvas=canvas
             else:
                 # img.crop()
                 by, bx, _, _ = img.bounds()

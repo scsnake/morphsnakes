@@ -6,14 +6,17 @@ import Tkinter as tk
 #   It's important that this code *not* interact directly with tkinter
 #   stuff in the main process since it doesn't support multi-threading.
 import threading
+import tkMessageBox
+from time import time
+import random
 
 import mouse
 import mss
 import numpy as np
 from PIL import Image, ImageTk
-from skimage.morphology import binary_dilation
 from skimage import measure
-from time import time
+from skimage.morphology import binary_dilation
+
 import morphsnakes
 
 
@@ -176,8 +179,49 @@ class RegionGrowing:
         self.hide_after_thread = th
         th.start()
 
+
+class Crop_arr:
+    def __init__(self, arr, x0=0, y0=0, x1=1, y1=1, crop=False):
+        self.x0 = x0
+        self.y0 = y0
+        self.x1 = x1
+        self.y1 = y1
+
+        if not crop or x0 is None or y0 is None or x1 is None or y1 is None:
+            self.arr = arr
+        else:
+            self.arr = arr[x0:x1, y0:y1]
+
+    def bounds(self):
+        return self.x0, self.y0, self.x1, self.y1
+
+    def image(self):
+        return ImageTk.PhotoImage(Image.fromarray((self.arr * 255).astype(np.uint8)))
+
+    def crop(self):
+        coords = np.argwhere(self.arr)
+
+        # Bounding box of non-black pixels.
+        try:
+            x0, y0 = coords.min(axis=0)
+            x1, y1 = coords.max(axis=0) + 1  # slices are exclusive at the top
+        except:
+            return
+
+        self.arr = self.arr[x0:x1, y0:y1]
+        self.x0 += x0
+        self.y0 += y0
+        self.x1 = self.x0 + x1 - x0
+        self.y1 = self.y0 + y1 - y0
+
+    def new_image(self):
+        ret = np.zeros((self.x1, self.y1), np.uint8)
+        ret[self.x0:self.x1, self.y0:self.y1] = self.arr
+        return ImageTk.PhotoImage(Image.fromarray((ret * 255).astype(np.uint8)))
+
+
 class Morph:
-    def __init__(self, img, seed= (0,0), alpha=1000, sigma=5.48, smoothing=1, threshold=0.31, balloon=20):
+    def __init__(self, img, seed=(0, 0), alpha=1000, sigma=5.48, smoothing=1, threshold=0.31, balloon=5):
         self.alpha = alpha
         self.sigma = sigma
         self.smoothing = smoothing
@@ -187,41 +231,49 @@ class Morph:
         self.seed = seed
         self.gI = morphsnakes.gborders(img, alpha=alpha, sigma=sigma)
         self.mgac = morphsnakes.MorphGAC(self.gI, smoothing=smoothing, threshold=threshold, balloon=balloon)
-        self.last_crop_levelset= self.last_levelset = self.mgac.levelset = circle_levelset(img.shape, (seed[1], seed[0]), balloon)
-        self.last_crop_bounds= (0,0,1,1)
+        self.last_levelset = self.mgac.levelset = circle_levelset(img.shape, (seed[0], seed[1]), balloon)
+        self.last_crop_levelset = Crop_arr(self.last_levelset)
+        self.iter_ind = 0
+        self.max_balloon = balloon * 2
 
-    def step(self):
+    def step(self, iters=1):
         balloon = self.balloon
         img = self.img
         # Coordinates of non-black pixels.
         coords = np.argwhere(self.last_levelset)
 
         # Bounding box of non-black pixels.
-        x0, y0 = coords.min(axis=0)
-        x1, y1 = coords.max(axis=0) + 1  # slices are exclusive at the top
+        try:
+            x0, y0 = coords.min(axis=0)
+            x1, y1 = coords.max(axis=0) + 1  # slices are exclusive at the top
+        except:
+            return
         bounds = [x0, y0, x1, y1]
         crop_bounds = []
         for i, c in enumerate(bounds):
-            c+=balloon*2 if i>1 else balloon*(-2)
-            if i<2:
-                c=0 if c<0 else c
-            elif i==2:
-                c=img.shape[0] if c>img.shape[0] else c
+            c += balloon * (iters + 1) if i > 1 else balloon * (-1) * (iters + 1)
+            if i < 2:
+                c = 0 if c < 0 else c
             else:
-                c = img.shape[1] if c > img.shape[1] else c
+                s = img.shape[i - 2]
+                c = s if c > s else c
+
             crop_bounds.append(c)
-        print self.last_crop_levelset.shape
+        # print self.last_crop_levelset.shape
+        (x0, y0, x1, y1) = crop_bounds = tuple(crop_bounds)
         gI = morphsnakes.gborders(img[x0:x1, y0:y1], alpha=self.alpha, sigma=self.sigma)
-        mgac = morphsnakes.MorphGAC(gI, smoothing=self.smoothing, threshold=self.threshold, balloon=self.balloon)
+        balloon = self.balloon * random.uniform(0.1, 1.2)
+        mgac = morphsnakes.MorphGAC(gI, smoothing=self.smoothing, threshold=self.threshold, balloon=balloon)
         mgac.levelset = self.last_levelset[x0:x1, y0:y1]
-
-        mgac.step()
-        self.last_crop_levelset = np.copy(self.last_levelset[x0:x1, y0:y1])
+        for _ in range(iters):
+            mgac.step()
         self.last_levelset[x0:x1, y0:y1] = mgac.levelset
-        self.last_crop_bounds = tuple(crop_bounds)
+        self.last_crop_levelset = Crop_arr(mgac.levelset, x0, y0, x1, y1)
 
-
-
+        self.iter_ind += iters
+        # self.balloon += iters
+        # if self.balloon > self.max_balloon:
+        #     self.balloon = self.max_balloon
 
 
 class RegionGrowingMorph:
@@ -251,7 +303,7 @@ class RegionGrowingMorph:
                 pass
             self.last_added.append((x, y))
         self.region_hx = Queue.LifoQueue()
-        self.region_hx.put(np.copy(self.region.mask), 0)
+        self.region_hx.put((np.copy(self.region.mask), 0, 0), 0)
         self.last_added_hx = Queue.LifoQueue()
         self.last_added_hx.put(np.copy(self.last_added), 0)
         self.growing_interval = 0.05
@@ -262,10 +314,9 @@ class RegionGrowingMorph:
         self.info_text = ''
         self.init_time = time()
 
-        self.morph = Morph(self.data, (self.y, self.x))
-        self.last_levelset=self.morph.last_levelset
-
-
+        self.morph = Morph(self.data, (self.y, self.x),
+                           balloon=int((self.this_monitor['width'] + self.this_monitor['height']) / 200.0))
+        self.last_levelset = self.morph.last_levelset
 
     def get_neighbors(self, x, y):
         for i, j in self.neighbors:
@@ -279,28 +330,26 @@ class RegionGrowingMorph:
         self.growing_state = True
         # print 'growing'
 
-        time_elapsed = time()-self.init_time
-        iters=2**int(time_elapsed/2)
-        if iters>10:
-            iters=10
+        time_elapsed = time() - self.init_time
+        iters = 2 ** int(time_elapsed / 2)
+        if iters > 10:
+            iters = 10
 
         for _ in range(iters):
             self.morph.step()
 
-
-
-        if np.array_equal(self.last_levelset, self.morph.last_crop_levelset):
+        if np.array_equal(self.last_levelset, self.morph.last_crop_levelset.arr):
             print 'growing done!'
 
             return self.finish()
         else:
-            ls = np.copy(self.morph.last_crop_levelset)
+            ls = np.copy(self.morph.last_crop_levelset.arr)
             self.last_levelset = ls
-            self.region_hx.put(ls, 0)
+            self.region_hx.put(self.morph.last_crop_levelset, 0)
 
         # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 255).astype(np.uint8),)).start()
         # print np.count_nonzero(~self.region.mask)
-        self.overlay((ls * 255).astype(np.uint8))
+        self.overlay()
 
         if mouse.is_pressed():
             self.growing_timer = threading.Timer(self.growing_interval, self.growing)
@@ -309,6 +358,7 @@ class RegionGrowingMorph:
             self.finish()
 
     def finish(self):
+        global q
         try:
             self.growing_timer.cancel()
         except:
@@ -316,19 +366,18 @@ class RegionGrowingMorph:
         print 'Finish'
         self.growing_state = False
 
-        result = binary_dilation(self.morph.last_crop_levelset)
+        result = binary_dilation(self.morph.last_crop_levelset.arr)
         regions = measure.regionprops(measure.label(result))
-
-        result = (result * 255).astype(np.uint8)
 
         try:
             self.info_text = 'Diameter: %d * %d \nArea: %d' % (int(regions[0].minor_axis_length),
                                                                int(regions[0].major_axis_length),
                                                                regions[0].area)
         except:
-            self.info_text=''
-
-        self.overlay(result)
+            self.info_text = ''
+        q.queue.clear()
+        threading.Timer(0.3, q.put, ['show_info', 0]).start()
+        self.overlay(result, *self.morph.last_crop_levelset.bounds())
         self.hide_after()
         # print np.nonzero(~self.region.mask)
 
@@ -336,35 +385,36 @@ class RegionGrowingMorph:
 
     def prior_step(self):
         try:
-            self.region.mask = self.region_hx.get(0)
-            self.overlay()
+            region = self.region_hx.get(0)
+            self.overlay(region)
         except:
             print 'No prior step available!'
 
-    def overlay(self, img=None):
+    def overlay(self, img=None, *args):
         global q
 
         # im=ImageTk.PhotoImage(Image.open(r"C:\Users\Administrator\Downloads\example.png"))
 
         if img is None:
-            img = (self.morph.last_crop_levelset * 255).astype(np.uint8)
+            img = self.morph.last_crop_levelset
+        elif args:
+            img = Crop_arr(img, *args)
 
-
-        if self.which_monitor>0:
-            im = ImageTk.PhotoImage(Image.fromarray(img))
-        else:
-            rgb = np.zeros((img.shape[0], img.shape[1], 3), np.uint8)
-            # rgb[:, :, 0] = img
-            rgb[:, :, 1] = img
-            im = ImageTk.PhotoImage(Image.fromarray(rgb))
-        q.put(im, 0)
+        # if self.which_monitor > 0:
+        #     im = ImageTk.PhotoImage(Image.fromarray(img))
+        # else:
+        #     rgb = np.zeros((img.shape[0], img.shape[1], 3), np.uint8)
+        #     # rgb[:, :, 0] = img
+        #     rgb[:, :, 1] = img
+        #     im = ImageTk.PhotoImage(Image.fromarray(rgb))
+        q.put(img, 0)
         q.put('show', 0)
         # overlay.show_image(im)
         # Image.fromarray(img, 'L').show()
         # threading.Thread(target=overlay.show_image, args=(im,)).start()
         # overlay.show_image(im)
 
-    def hide_after(self, ms=10000):
+    def hide_after(self, ms=1000):
         global q
         try:
             self.hide_after_thread.cancel()
@@ -380,7 +430,7 @@ def rbutton_down(*args):
     if not rg or rg.growing_state:
         return
     rg.prior_step()
-    rg.hide_after()
+    rg.hide_after(2000)
 
 
 def lbutton_down(*args):
@@ -399,8 +449,9 @@ def lbutton_down(*args):
 
 
 def RegionGrowingTask():
-    global rg
+    global rg, q
     if mouse.is_pressed():
+        q.put('hide_info', 0)
         rg = RegionGrowingMorph()
         rg.growing()
 
@@ -414,25 +465,22 @@ def lbutton_up(*args):
     # threading.Threaad(target=lambda rg: rg.finish(), args=(rg,)).start()
 
 
-
-
-
 class Overlay:
     def __init__(self):
         root = tk.Tk()
 
-        frame = tk.Frame(root, bg='black')
-        canvas = tk.Canvas(frame, bg="black", bd=0, highlightthickness=0)
+        # frame = tk.Frame(root, bg='black')
+        canvas = tk.Canvas(root, bg="black", bd=0, highlightthickness=0)
         img = None  # initially only need a canvas image place-holder
         # img = ImageTk.PhotoImage(Image.open(r"C:\Users\Administrator\Downloads\example.png"))
         image_id = canvas.create_image(0, 0, image=img, anchor='nw')
-        canvas.pack(side="left", fill="both", expand=True)
+        # canvas.pack(side="left")
+        canvas.place(relx=0.0, rely=0.0, anchor='nw')
+        # info = tk.Label(root, text="", width=0, borderwidth=0, font=('Verdana', 20), justify='left',
+        #                 bg='white', fg='#010101')
+        # info.place(relx=0.0, rely=0.0, x=-2, y=-2, anchor="sw")
 
-        info = tk.Label(root, text="", width=1, borderwidth=1, font=('Verdana', 20), justify='left',
-                        bg='white', fg='gray')
-        info.place(relx=0.0, rely=0.0, x=-2, y=-2, anchor="se")
-
-        frame.pack(side="top", fill="both", expand=True)
+        # frame.pack(side="top", fill="both", expand=True)
 
         root.title('overlay')
         root.overrideredirect(1)
@@ -444,8 +492,8 @@ class Overlay:
         # root.bind('<ButtonRelease-1>', lbutton_up)
 
         self.root = root
-        self.frame = frame
-        self.info = info
+        # self.frame = frame
+        # self.info = info
         self.canvas = canvas
         self.image_id = image_id
         self.x = self.y = 0
@@ -455,8 +503,8 @@ class Overlay:
         global rg, q
         root = self.root
         canvas = self.canvas
-        info = self.info
-        frame = self.frame
+        # info = self.info
+        # frame = self.frame
         image_id = self.image_id
         try:
             img = q.get(0)
@@ -465,28 +513,35 @@ class Overlay:
                 root.update()
                 root.deiconify()
             elif img == 'hide' and not rg.growing_state:
-                info.config(text=rg.info_text, width=1)
-                info.place(relx=0.0, rely=0.0, x=-2, y=-2, anchor="nw")
                 root.withdraw()
+            elif img == 'hide_info':
+                # info.place_forget()
+                pass
+            elif img == 'show_info':
+                if rg.info_text:
+                    # info.config(text=rg.info_text, width=30)
+                    # info.place(relx=0.0, rely=1.0)
+                    tkMessageBox.showinfo('Info', rg.info_text)
             else:
-                bounds = rg.morph.last_crop_bounds
-                w, h = img.width(), img.height()
-                x, y = rg.this_monitor['left']+bounds[0], rg.this_monitor['top']+bounds[1]
-                # print x, y
-
-                x=str(x) if x<0 else '+'+str(x)
-                y=str(y) if y<0 else '+'+str(y)
-                root.geometry('%dx%d%s%s' % (w+300, h+300, x, y))
-                canvas.image = img
+                # img.crop()
+                by, bx, _, _ = img.bounds()
+                im = img.image()
+                # print bounds
+                w, h = im.width(), im.height()
+                x, y = rg.this_monitor['left'] + bx, rg.this_monitor['top'] + by
+                # print bx, by, x, y, w, h
+                #
+                x = str(x) if x < 0 else '+' + str(x)
+                y = str(y) if y < 0 else '+' + str(y)
+                root.geometry('%dx%d%s%s' % (w, h, x, y))
+                canvas.image = im
 
                 canvas.config(width=w, height=h)
                 # print img.width(), img.height()
-                canvas.itemconfigure(image_id, image=img)
+                canvas.itemconfigure(image_id, image=im)
 
-                if rg.info_text:
-                    print rg.info_text
-                    info.config(text=rg.info_text, width=20)
-                    info.place(relx=1.0 , rely=1.0)
+
+
         except:  # missing or corrupt image file
             pass
         # repeat every half sec
@@ -507,10 +562,10 @@ if __name__ == '__main__':
     #     time.sleep(.1)
     # ------------------------------------------------------------------------------
 
-
     mouse.on_button(rbutton_down, buttons='right', types='down')
     mouse.on_button(lbutton_down, buttons='left', types='down')
     # mouse.on_button(lbutton_up, buttons='left', types='up')
 
     overlay = Overlay()
+    print 'ready'
     overlay.root.mainloop()

@@ -1,15 +1,17 @@
 import Queue
 import Tkinter as tk
+import json
+import random
 # ------------------------------------------------------------------------------
 # Code to simulate background process periodically updating the image file.
 # Note:
 #   It's important that this code *not* interact directly with tkinter
 #   stuff in the main process since it doesn't support multi-threading.
 import threading
-import tkMessageBox
-from time import time
-import random
+import win32gui
 from copy import deepcopy
+from time import time
+
 import mouse
 import mss
 import numpy as np
@@ -18,6 +20,13 @@ from skimage import measure
 from skimage.morphology import binary_dilation
 
 import morphsnakes
+from win32func import Send_WM_COPYDATA
+
+
+def sendinfo(info):
+    dwData = 19
+    hwnd = win32gui.FindWindow('AutoHotkeyGUI', '__nodule_info')
+    Send_WM_COPYDATA(int(hwnd), json.dumps(info), dwData)
 
 
 def all_monitors_info():
@@ -91,6 +100,8 @@ class RegionGrowing:
         self.growing_timer = None
 
         self.tmp = 0
+
+        self.info = {}
 
     def get_neighbors(self, x, y):
         for i, j in self.neighbors:
@@ -317,6 +328,7 @@ class RegionGrowingMorph:
         self.morph = Morph(self.data, (self.y, self.x),
                            balloon=int((self.this_monitor['width'] + self.this_monitor['height']) / 500.0))
         self.last_levelset = self.morph.last_levelset
+        self.info = {}
 
     def get_neighbors(self, x, y):
         for i, j in self.neighbors:
@@ -373,9 +385,15 @@ class RegionGrowingMorph:
             self.info_text = 'Diameter: %d * %d \nArea: %d' % (int(regions[0].minor_axis_length),
                                                                int(regions[0].major_axis_length),
                                                                regions[0].area)
+            self.info = {'min_diameter': int(regions[0].minor_axis_length),
+                         'max_diameter': int(regions[0].major_axis_length),
+                         'area': regions[0].area}
         except:
             self.info_text = ''
-        q.queue.clear()
+            self.info = {}
+        # q.queue.clear()
+        # del q
+        q = Queue.Queue()
         threading.Timer(0.3, q.put, ['show_info', 0]).start()
         self.overlay(result, *self.morph.last_crop_levelset.bounds())
         self.growing_state = False
@@ -453,7 +471,7 @@ def lbutton_down(*args):
 def RegionGrowingTask():
     global rg, q
     if mouse.is_pressed():
-        q.put('renew',0)
+        q.put('renew', 0)
         q.put('hide_info', 0)
         rg = RegionGrowingMorph()
         rg.growing()
@@ -524,7 +542,8 @@ class Overlay:
                 if rg.info_text:
                     # info.config(text=rg.info_text, width=30)
                     # info.place(relx=0.0, rely=1.0)
-                    tkMessageBox.showinfo('Info', rg.info_text)
+                    # tkMessageBox.showinfo('Info', rg.info_text)
+                    sendinfo(rg.info)
             elif img == 'renew':
                 canvas.delete(tk.ALL)
                 canvas = tk.Canvas(root, bg="black", bd=0, highlightthickness=0)
@@ -533,7 +552,7 @@ class Overlay:
                 image_id = canvas.create_image(0, 0, image=img, anchor='nw')
                 # canvas.pack(side="left")
                 canvas.place(relx=0.0, rely=0.0, anchor='nw')
-                self.canvas=canvas
+                self.canvas = canvas
             else:
                 # img.crop()
                 by, bx, _, _ = img.bounds()

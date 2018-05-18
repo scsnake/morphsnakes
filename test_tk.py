@@ -25,7 +25,7 @@ from win32func import Send_WM_COPYDATA
 
 def sendinfo(info):
     dwData = 19
-    hwnd = win32gui.FindWindow('AutoHotkeyGUI', '__nodule_info')
+    hwnd = win32gui.FindWindow('AutoHotkeyGUI', 'showLungCAD_main')
     Send_WM_COPYDATA(int(hwnd), json.dumps(info), dwData)
 
 
@@ -382,12 +382,20 @@ class RegionGrowingMorph:
         regions = measure.regionprops(measure.label(result))
 
         try:
-            self.info_text = 'Diameter: %d * %d \nArea: %d' % (int(regions[0].minor_axis_length),
-                                                               int(regions[0].major_axis_length),
-                                                               regions[0].area)
+            min_d, max_d, area, cen, bounds = int(regions[0].minor_axis_length), \
+                                            int(regions[0].major_axis_length), \
+                                            regions[0].area, \
+                                            regions[0].centroid, \
+                                            self.morph.last_crop_levelset.bounds()
+
+            self.info_text = 'Diameter: %d * %d \nArea: %d\nCenter: %d,%d' % (min_d, max_d, area,
+                                                                              cen[1]+bounds[1],
+                                                                              cen[0]+bounds[0])
             self.info = {'min_diameter': int(regions[0].minor_axis_length),
                          'max_diameter': int(regions[0].major_axis_length),
-                         'area': regions[0].area}
+                         'area': regions[0].area,
+                         'center_x': int(cen[1]+bounds[1]+self.this_monitor['left']),
+                         'center_y': int(cen[0]+bounds[0]+self.this_monitor['top'])}
         except:
             self.info_text = ''
             self.info = {}

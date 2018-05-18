@@ -12,7 +12,7 @@ import win32gui
 from copy import deepcopy
 from time import time
 
-import mouse
+import mouse, keyboard
 import mss
 import numpy as np
 from PIL import Image, ImageTk
@@ -140,9 +140,9 @@ class RegionGrowing:
         self.last_added = added_points
         # print added_points
 
-        # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 255).astype(np.uint8),)).start()
+        # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 101).astype(np.uint8),)).start()
         # print np.count_nonzero(~self.region.mask)
-        self.overlay(((~self.region.mask) * 255).astype(np.uint8))
+        self.overlay(((~self.region.mask) * 101).astype(np.uint8))
 
         if mouse.is_pressed():
             self.growing_timer = threading.Timer(self.growing_interval, self.growing)
@@ -155,16 +155,16 @@ class RegionGrowing:
             pass
         # print 'Finish'
         self.growing_state = False
-        self.overlay(((~self.region.mask) * 255).astype(np.uint8))
+        self.overlay(((~self.region.mask) * 101).astype(np.uint8))
         # print np.nonzero(~self.region.mask)
 
-        # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 255).astype(np.uint8),)).start()
+        # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 101).astype(np.uint8),)).start()
 
     def prior_step(self):
         try:
             self.region.mask = self.region_hx.get(0)
             self.last_added = self.last_added_hx.get(0)
-            self.overlay(((~self.region.mask) * 255).astype(np.uint8))
+            self.overlay(((~self.region.mask) * 101).astype(np.uint8))
         except:
             print 'No prior step available!'
 
@@ -207,7 +207,7 @@ class Crop_arr:
         return self.x0, self.y0, self.x1, self.y1
 
     def image(self):
-        return ImageTk.PhotoImage(Image.fromarray((self.arr * 255).astype(np.uint8)))
+        return ImageTk.PhotoImage(Image.fromarray((self.arr * 101).astype(np.uint8)))
 
     def crop(self):
         coords = np.argwhere(self.arr)
@@ -228,7 +228,7 @@ class Crop_arr:
     def new_image(self):
         ret = np.zeros((self.x1, self.y1), np.uint8)
         ret[self.x0:self.x1, self.y0:self.y1] = self.arr
-        return ImageTk.PhotoImage(Image.fromarray((ret * 255).astype(np.uint8)))
+        return ImageTk.PhotoImage(Image.fromarray((ret * 101).astype(np.uint8)))
 
 
 class Morph:
@@ -359,7 +359,7 @@ class RegionGrowingMorph:
             self.last_levelset = ls
             self.region_hx.put(self.morph.last_crop_levelset, 0)
 
-        # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 255).astype(np.uint8),)).start()
+        # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 101).astype(np.uint8),)).start()
         # print np.count_nonzero(~self.region.mask)
         self.overlay()
 
@@ -408,7 +408,7 @@ class RegionGrowingMorph:
         self.hide_after()
         # print np.nonzero(~self.region.mask)
 
-        # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 255).astype(np.uint8),)).start()
+        # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 101).astype(np.uint8),)).start()
 
     def prior_step(self):
         try:
@@ -441,7 +441,7 @@ class RegionGrowingMorph:
         # threading.Thread(target=overlay.show_image, args=(im,)).start()
         # overlay.show_image(im)
 
-    def hide_after(self, ms=1000):
+    def hide_after(self, ms=5000):
         global q
         try:
             self.hide_after_thread.cancel()
@@ -463,8 +463,8 @@ def rbutton_down(*args):
 def lbutton_down(*args):
     global q, rg, task
     # canvas.config(width=1000, height=700)
-    # if not keyboard.is_pressed('shift'):
-    #     return
+    if not keyboard.is_pressed('shift'):
+        return
     try:
         task.cancel()
 
@@ -473,12 +473,12 @@ def lbutton_down(*args):
 
     task = threading.Timer(0.5, RegionGrowingTask)
     task.start()
-    # q.put(ImageTk.PhotoImage(Image.fromarray((np.eye(800) * 255).astype('uint8'), 'L').resize((800,800))),0)
+    # q.put(ImageTk.PhotoImage(Image.fromarray((np.eye(800) * 101).astype('uint8'), 'L').resize((800,800))),0)
 
 
 def RegionGrowingTask():
     global rg, q
-    if mouse.is_pressed():
+    if mouse.is_pressed() and keyboard.is_pressed('shift'):
         q.put('renew', 0)
         q.put('hide_info', 0)
         rg = RegionGrowingMorph()
@@ -601,7 +601,7 @@ if __name__ == '__main__':
     #     time.sleep(.1)
     # ------------------------------------------------------------------------------
 
-    mouse.on_button(rbutton_down, buttons='right', types='down')
+    # mouse.on_button(rbutton_down, buttons='right', types='down')
     mouse.on_button(lbutton_down, buttons='left', types='down')
     # mouse.on_button(lbutton_up, buttons='left', types='up')
 

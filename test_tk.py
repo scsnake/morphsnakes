@@ -21,7 +21,11 @@ from skimage.morphology import binary_dilation
 
 import morphsnakes
 from win32func import Send_WM_COPYDATA
+import gc
 
+def destroy(rg):
+    rg=None
+    gc.collect()
 
 def sendinfo(info):
     dwData = 19
@@ -406,6 +410,7 @@ class RegionGrowingMorph:
         self.overlay(result, *self.morph.last_crop_levelset.bounds())
         self.growing_state = False
         self.hide_after()
+        threading.Timer(5, destroy, [self]).start()
         # print np.nonzero(~self.region.mask)
 
         # threading.Thread(target=self.overlay, args=(((~self.region.mask) * 101).astype(np.uint8),)).start()

@@ -1,4 +1,4 @@
-import Queue
+import queue
 import Tkinter as tk
 import json
 import random
@@ -12,7 +12,8 @@ import win32gui
 from copy import deepcopy
 from time import time
 
-import mouse, keyboard
+# import mouse, keyboard
+
 import mss
 import numpy as np
 from PIL import Image, ImageTk
@@ -20,7 +21,7 @@ from skimage import measure
 from skimage.morphology import binary_dilation
 
 import morphsnakes
-from win32func import Send_WM_COPYDATA
+from win32func import Send_WM_COPYDATA,WM_COPYDATA_Listener
 import gc
 
 def destroy(rg):
@@ -40,9 +41,10 @@ def all_monitors_info():
 
 
 def mouse_in_which_monitor(x=None, y=None, monitors_info=None):
+    global mouse_pos
     if x is None or y is None:
         # x, y = pyautogui.position()
-        x, y = mouse.get_position()
+        x, y = mouse_pos
     if monitors_info is None:
         monitors_info = all_monitors_info()
 
@@ -75,12 +77,13 @@ def rgb2gray(img):
 
 class RegionGrowing:
     def __init__(self):
-        self.mouseX, self.mouseY = mouse.get_position()
+        global mouse_pos
+        self.mouseX, self.mouseY = mouse_pos
         self.which_monitor, self.this_monitor = mouse_in_which_monitor(self.mouseX, self.mouseY)
         self.data = rgb2gray(np.array(get_current_screen(self.this_monitor)))
         self.x, self.y = self.mouseX - self.this_monitor['left'], self.mouseY - self.this_monitor['top']
         # print 'mouse x,y = %d,%d' % (self.mouseX, self.mouseY)
-        print 'x,y = %d,%d' % (self.x, self.y)
+        print('x,y = %d,%d' % (self.x, self.y))
         self.region = np.ma.masked_array(self.data, np.ones(self.data.shape))
         self.last_added = []
 
@@ -95,9 +98,9 @@ class RegionGrowing:
             except:
                 pass
             self.last_added.append((x, y))
-        self.region_hx = Queue.LifoQueue()
+        self.region_hx = queue.LifoQueue()
         self.region_hx.put(np.copy(self.region.mask), 0)
-        self.last_added_hx = Queue.LifoQueue()
+        self.last_added_hx = queue.LifoQueue()
         self.last_added_hx.put(np.copy(self.last_added), 0)
         self.growing_interval = 0.4
 
@@ -112,11 +115,12 @@ class RegionGrowing:
             yield (x + i, y + j)
 
     def growing(self):
-        if not mouse.is_pressed():
+        global lbutton_pressed
+        if not lbutton_pressed:
             self.growing_state = False
             return
         self.growing_state = True
-        print 'growing'
+        print('growing')
         # self.tmp+=1
         # if self.tmp==2:
         #     tt=1
@@ -148,7 +152,7 @@ class RegionGrowing:
         # print np.count_nonzero(~self.region.mask)
         self.overlay(((~self.region.mask) * 101).astype(np.uint8))
 
-        if mouse.is_pressed():
+        if lbutton_pressed:
             self.growing_timer = threading.Timer(self.growing_interval, self.growing)
             self.growing_timer.start()
 
@@ -170,7 +174,7 @@ class RegionGrowing:
             self.last_added = self.last_added_hx.get(0)
             self.overlay(((~self.region.mask) * 101).astype(np.uint8))
         except:
-            print 'No prior step available!'
+            print('No prior step available!')
 
     def overlay(self, img):
         global q
@@ -293,8 +297,8 @@ class Morph:
 
 class RegionGrowingMorph:
     def __init__(self):
-        global q
-        self.mouseX, self.mouseY = mouse.get_position()
+        global q, mouse_pos
+        self.mouseX, self.mouseY = mouse_pos
         self.which_monitor, self.this_monitor = mouse_in_which_monitor(self.mouseX, self.mouseY)
         self.data = rgb2gray(np.array(get_current_screen(self.this_monitor)))
 
@@ -302,7 +306,7 @@ class RegionGrowingMorph:
 
         self.x, self.y = self.mouseX - self.this_monitor['left'], self.mouseY - self.this_monitor['top']
         # print 'mouse x,y = %d,%d' % (self.mouseX, self.mouseY)
-        print 'x,y = %d,%d' % (self.x, self.y)
+        print('x,y = %d,%d' % (self.x, self.y))
         self.region = np.ma.masked_array(self.data, np.ones(self.data.shape))
         self.last_added = []
 
@@ -317,9 +321,9 @@ class RegionGrowingMorph:
             except:
                 pass
             self.last_added.append((x, y))
-        self.region_hx = Queue.LifoQueue()
+        self.region_hx = queue.LifoQueue()
         # self.region_hx.put((np.copy(self.region.mask), 0, 0), 0)
-        self.last_added_hx = Queue.LifoQueue()
+        self.last_added_hx = queue.LifoQueue()
         # self.last_added_hx.put(np.copy(self.last_added), 0)
         self.growing_interval = 0.05
 
@@ -340,7 +344,8 @@ class RegionGrowingMorph:
 
     def growing(self):
         # print mouse.is_pressed()
-        if not mouse.is_pressed():
+        global lbutton_pressed
+        if not lbutton_pressed:
             self.growing_state = False
             return self.finish()
         self.growing_state = True
@@ -355,7 +360,7 @@ class RegionGrowingMorph:
             self.morph.step(2)
 
         if np.array_equal(self.last_levelset, self.morph.last_crop_levelset.arr):
-            print 'growing done!'
+            print('growing done!')
 
             return self.finish()
         else:
@@ -367,7 +372,7 @@ class RegionGrowingMorph:
         # print np.count_nonzero(~self.region.mask)
         self.overlay()
 
-        if mouse.is_pressed():
+        if lbutton_pressed:
             self.growing_timer = threading.Timer(self.growing_interval, self.growing)
             self.growing_timer.start()
         else:
@@ -379,7 +384,7 @@ class RegionGrowingMorph:
             self.growing_timer.cancel()
         except:
             pass
-        print 'Finish'
+        print('Finish')
         self.growing_state = False
 
         result = binary_dilation(self.morph.last_crop_levelset.arr)
@@ -405,7 +410,7 @@ class RegionGrowingMorph:
             self.info = {}
         # q.queue.clear()
         # del q
-        q = Queue.Queue()
+        q = queue.Queue()
         threading.Timer(0.3, q.put, ['show_info', 0]).start()
         self.overlay(result, *self.morph.last_crop_levelset.bounds())
         self.growing_state = False
@@ -420,7 +425,7 @@ class RegionGrowingMorph:
             region = self.region_hx.get(0)
             self.overlay(region)
         except:
-            print 'No prior step available!'
+            print('No prior step available!')
 
     def overlay(self, img=None, *args):
         global q
@@ -483,11 +488,10 @@ def lbutton_down(*args):
 
 def RegionGrowingTask():
     global rg, q
-    if mouse.is_pressed() and keyboard.is_pressed('shift'):
-        q.put('renew', 0)
-        q.put('hide_info', 0)
-        rg = RegionGrowingMorph()
-        rg.growing()
+    q.put('renew', 0)
+    q.put('hide_info', 0)
+    rg = RegionGrowingMorph()
+    rg.growing()
 
 
 def lbutton_up(*args):
@@ -591,12 +595,29 @@ class Overlay:
         # repeat every half sec
         canvas.after(10, self.refresh_image)
 
+def listener(*args, **kwargs):
+    global mouse_pos, lbutton_pressed
+    try:
+        if kwargs['dwData'] != 25:
+            return
+
+        json_data = json.loads(kwargs['lpData'])
+        if 'start' in json_data:
+            mouse_pos = tuple(json_data['mouse_pos'])
+            lbutton_pressed=True
+            threading.Thread(target=RegionGrowingTask).start()
+        elif 'end' in json_data:
+            lbutton_pressed=False
+            threading.Thread(target=lbutton_up).start()
+
+    except:
+        pass
 
 if __name__ == '__main__':
     rg = None
     task = None
     # root = tk.Tk()
-    q = Queue.Queue()
+    q = queue.Queue()
     # ------------------------------------------------------------------------------
     # More code to simulate background process periodically updating the image file.
     # th = threading.Thread(target=update_image_file, args=(q,))
@@ -605,11 +626,11 @@ if __name__ == '__main__':
     # while not os.path.exists(image_path):  # let it run until image file exists
     #     time.sleep(.1)
     # ------------------------------------------------------------------------------
-
+    WM_Listener = WM_COPYDATA_Listener(receiver=listener, title='WM_COPYDATA_Listener_RegionGrowMorph')
     # mouse.on_button(rbutton_down, buttons='right', types='down')
-    mouse.on_button(lbutton_down, buttons='left', types='down')
+    # mouse.on_button(lbutton_down, buttons='left', types='down')
     # mouse.on_button(lbutton_up, buttons='left', types='up')
 
     overlay = Overlay()
-    print 'ready'
+    print('ready')
     overlay.root.mainloop()
